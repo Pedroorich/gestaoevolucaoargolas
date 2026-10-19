@@ -26,6 +26,19 @@ import {
   salvarPerfilUsuario,
   buscarUsuarioPorId,
 } from '@/lib/firebase/user-service';
+import { limparDadosLocaisExcetoLogin } from '@/lib/storage/offline-fallback';
+
+// Garante que qualquer resquício de teste local no navegador seja purgado, mantendo apenas o login
+if (typeof window !== 'undefined') {
+  try {
+    if (localStorage.getItem('evolucao_limpeza_inicial_v1') !== 'concluida') {
+      limparDadosLocaisExcetoLogin();
+      localStorage.setItem('evolucao_limpeza_inicial_v1', 'concluida');
+    }
+  } catch {
+    // Ignora restrições de storage
+  }
+}
 
 export interface AuthContextType {
   user: Usuario | null;
