@@ -4,7 +4,7 @@
  */
 
 export const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "",
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "dummy-api-key-for-prerendering",
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "evolucao-argolas.firebaseapp.com",
   projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "evolucao-argolas",
   storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "evolucao-argolas.firebasestorage.app",
