@@ -2,6 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { criarSaida, concluirBanhoRemessa, listarSaidasAtivas } from "@/lib/firebase/producao-service";
 import { cadastrarClienteRapido, criarPedidoVenda, listarClientesParaVenda, listarPedidosVendas } from "@/lib/firebase/vendas-service";
 
+vi.mock("@/lib/firebase/client", () => ({
+  db: {},
+}));
+
 describe("Serviços Firebase: Fluxo de Banho e Endereços", () => {
   beforeEach(() => {
     localStorage.clear();

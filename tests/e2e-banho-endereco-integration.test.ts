@@ -20,6 +20,10 @@ import {
   calcularEstoqueBanho,
 } from "@/lib/vendas/vendas-engine";
 
+vi.mock("@/lib/firebase/client", () => ({
+  db: {},
+}));
+
 describe("E2E Integrado: Ciclo Completo de Produção, Banho, Logística e Entrega com Endereço", () => {
   beforeEach(() => {
     localStorage.clear();

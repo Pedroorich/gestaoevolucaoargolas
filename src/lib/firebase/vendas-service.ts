@@ -140,7 +140,7 @@ export async function criarPedidoVenda(
     atualizadoEm: serverTimestamp(),
   };
 
-  let docId = `ped-${Date.now()}`;
+  let docId = `ped-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
   try {
     const docRef = await addDoc(
@@ -368,7 +368,7 @@ export async function cadastrarClienteRapido(
     atualizadoEm: serverTimestamp(),
   };
 
-  let docId = `cli-${Date.now()}`;
+  let docId = `cli-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
   try {
     const docRef = await addDoc(collection(db, "clientes"), clienteData);

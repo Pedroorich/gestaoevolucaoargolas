@@ -33,7 +33,7 @@ export async function registrarLogAuditoria(
     return ref.id;
   } catch (err: any) {
     console.warn("Aviso Firestore ao registrar auditoria:", err.message);
-    const localId = `audit-${Date.now()}`;
+    const localId = `audit-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     salvarNoLocalStorage("logs_auditoria", {
       ...log,
       id: localId,
@@ -94,7 +94,7 @@ export async function criarLote(
     atualizadoEm: serverTimestamp(),
   };
 
-  let docId = `lote-${Date.now()}`;
+  let docId = `lote-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
   try {
     const docRef = await addDoc(collection(db, "lotes_producao"), dadosParaSalvar);
@@ -222,7 +222,7 @@ export async function criarSaida(
     ativo: true,
   };
 
-  let docId = `saida-${Date.now()}`;
+  let docId = `saida-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
   try {
     const docRef = await addDoc(collection(db, "saidas_producao"), {
@@ -286,13 +286,10 @@ export async function concluirBanhoRemessa(
   }
 
   // Atualização no localStorage
-  const saidasLocais = buscarDoLocalStorage<any>("saidas_producao");
-  const idx = saidasLocais.findIndex((s) => s.id === saidaId);
-  if (idx !== -1) {
-    saidasLocais[idx].statusBanho = "concluido";
-    saidasLocais[idx].dataRetornoBanho = dataRetorno;
-    localStorage.setItem("saidas_producao", JSON.stringify(saidasLocais));
-  }
+  atualizarNoLocalStorage("saidas_producao", saidaId, {
+    statusBanho: "concluido",
+    dataRetornoBanho: dataRetorno,
+  });
 }
 
 /**

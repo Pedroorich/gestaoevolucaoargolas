@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => {
       include: ['tests/**/*.test.{ts,tsx}'],
       env: {
         ...env,
-        NEXT_PUBLIC_FIREBASE_API_KEY: env.NEXT_PUBLIC_FIREBASE_API_KEY || 'mock_test_key_environment_only',
+        NEXT_PUBLIC_FIREBASE_API_KEY: 'mock_test_key_environment_only',
       },
     },
     resolve: {
