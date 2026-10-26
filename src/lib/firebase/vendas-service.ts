@@ -28,6 +28,7 @@ import {
   buscarDoLocalStorage,
   atualizarNoLocalStorage,
 } from "@/lib/storage/offline-fallback";
+import { sanitizeTextInput } from "@/lib/auth/security";
 
 export interface NovoPedidoInput {
   clienteId: string;
@@ -119,21 +120,21 @@ export async function criarPedidoVenda(
 
   const dadosParaSalvar = {
     numeroPedido: proximoNumero,
-    clienteId: pedidoInput.clienteId.trim(),
-    clienteNome: pedidoInput.clienteNome.trim(),
-    enderecoEntrega: pedidoInput.enderecoEntrega?.trim() || "",
+    clienteId: sanitizeTextInput(pedidoInput.clienteId, 100),
+    clienteNome: sanitizeTextInput(pedidoInput.clienteNome, 150),
+    enderecoEntrega: sanitizeTextInput(pedidoInput.enderecoEntrega, 250),
     data: pedidoInput.data || serverTimestamp(),
     tipoEnvio: pedidoInput.tipoEnvio,
-    custoFreteCentavos: pedidoInput.custoFreteCentavos,
-    custoEmbalagemCentavos: pedidoInput.custoEmbalagemCentavos || 0,
-    custoCombustivelCentavos: pedidoInput.custoCombustivelCentavos || 0,
+    custoFreteCentavos: Math.max(0, Math.floor(pedidoInput.custoFreteCentavos || 0)),
+    custoEmbalagemCentavos: Math.max(0, Math.floor(pedidoInput.custoEmbalagemCentavos || 0)),
+    custoCombustivelCentavos: Math.max(0, Math.floor(pedidoInput.custoCombustivelCentavos || 0)),
     itens: pedidoInput.itens,
-    totalItensCentavos,
-    totalPedidoCentavos: totalGeralCentavos,
-    totalUnidades,
+    totalItensCentavos: Math.max(0, Math.floor(totalItensCentavos)),
+    totalPedidoCentavos: Math.max(0, Math.floor(totalGeralCentavos)),
+    totalUnidades: Math.max(0, Math.floor(totalUnidades)),
     situacao: pedidoInput.situacao || ("pendente" as SituacaoPedido),
-    observacoes: pedidoInput.observacoes?.trim() || "",
-    responsavelId: pedidoInput.responsavelId,
+    observacoes: sanitizeTextInput(pedidoInput.observacoes, 500),
+    responsavelId: sanitizeTextInput(pedidoInput.responsavelId, 100),
     ativo: true,
     criadoEm: serverTimestamp(),
     atualizadoEm: serverTimestamp(),
@@ -352,13 +353,13 @@ export async function cadastrarClienteRapido(
   }
 
   const clienteData = {
-    nome: dados.nome.trim(),
-    telefone: dados.telefone ? dados.telefone.trim() : "",
-    cidade: dados.cidade ? dados.cidade.trim() : "São Paulo",
-    endereco: dados.endereco ? dados.endereco.trim() : "",
-    cep: dados.cep ? dados.cep.trim() : "",
-    email: dados.email?.trim() || "",
-    origemContato: dados.origemContato || "direto",
+    nome: sanitizeTextInput(dados.nome, 150),
+    telefone: sanitizeTextInput(dados.telefone, 30),
+    cidade: sanitizeTextInput(dados.cidade, 100) || "São Paulo",
+    endereco: sanitizeTextInput(dados.endereco, 250),
+    cep: sanitizeTextInput(dados.cep, 20),
+    email: dados.email ? sanitizeTextInput(dados.email, 120).toLowerCase() : "",
+    origemContato: sanitizeTextInput(dados.origemContato, 50) || "direto",
     totalCompras: 0,
     dataUltimaCompra: null,
     situacao: "prospeccao",

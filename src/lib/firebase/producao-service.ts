@@ -17,6 +17,7 @@ import {
   buscarDoLocalStorage,
   atualizarNoLocalStorage,
 } from "@/lib/storage/offline-fallback";
+import { sanitizeTextInput } from "@/lib/auth/security";
 
 /**
  * Registra uma entrada imutável no log de auditoria do sistema.
@@ -80,13 +81,14 @@ export async function criarLote(
       ? loteData.custoUnitarioCentavos
       : loteData.custoMaterialCentavos !== undefined
       ? calculateUnitCost(loteData.custoMaterialCentavos, unidadesBoas)
-      : undefined;
+      : null;
 
   const dadosParaSalvar = {
     ...loteData,
     quantidadeProduzida: quantidadeFinal,
     pesoKg: pesoKgFinal,
-    custoUnitarioCentavos: custoUnitarioCalculado,
+    custoUnitarioCentavos: custoUnitarioCalculado ?? null,
+    responsavelId: sanitizeTextInput(loteData.responsavelId, 100),
     ativo: true,
     criadoEm: serverTimestamp(),
     atualizadoEm: serverTimestamp(),
@@ -366,16 +368,18 @@ export async function excluirLoteLogico(
       atualizadoEm: serverTimestamp(),
     });
 
+    const motivoSanitizado = sanitizeTextInput(motivo, 300);
+
     // Log de auditoria registrando o motivo
     await registrarLogAuditoria({
-      usuarioId,
-      usuarioNome,
+      usuarioId: sanitizeTextInput(usuarioId, 100),
+      usuarioNome: sanitizeTextInput(usuarioNome, 150),
       acao: "EXCLUIR_LOGICO",
       tabela: "lotes_producao",
       registroId: loteId,
       valoresNovos: {
         ativo: false,
-        motivo,
+        motivo: motivoSanitizado,
       },
     });
   } catch (err: any) {

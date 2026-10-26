@@ -243,6 +243,74 @@ export function resetRateLimit(identifier: string): void {
   }
 }
 
+/**
+ * Sanitiza campos de texto livres (como endereços, observações de pedidos e clientes),
+ * prevenindo injeções de scripts, HTML malicioso e caracteres de controle perigosos.
+ */
+export function sanitizeTextInput(input?: string | null, maxLength = 500): string {
+  if (!input || typeof input !== 'string') return '';
+  const stripped = input.replace(/<[^>]*>?/gm, '').trim();
+  const sanitized = stripped.replace(/[\u0000-\u001F\u007F-\u009F]/g, '').trim();
+  return sanitized.slice(0, maxLength);
+}
+
+/**
+ * Comparação de strings em tempo constante (Constant-Time String Comparison).
+ * Previne ataques de canal lateral baseados em tempo (Timing Attacks) ao validar hashes e tokens.
+ */
+export function timingSafeEqual(a: string, b: string): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  if (a.length !== b.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i++) {
+    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
+
+const MAX_REGISTRATION_ATTEMPTS = 3;
+const REGISTRATION_LOCKOUT_MS = 30 * 60 * 1000; // 30 minutos
+
+export function checkRegistrationRateLimit(identifier: string): {
+  isBlocked: boolean;
+  waitSeconds: number;
+} {
+  const cleanId = `reg_${identifier.toLowerCase().trim()}`;
+  const entry = loadEntry(cleanId);
+  const now = Date.now();
+
+  if (entry.lockedUntil && entry.lockedUntil > now) {
+    const waitSeconds = Math.ceil((entry.lockedUntil - now) / 1000);
+    return { isBlocked: true, waitSeconds };
+  }
+
+  return { isBlocked: false, waitSeconds: 0 };
+}
+
+export function recordRegistrationAttempt(identifier: string): {
+  isBlocked: boolean;
+  waitSeconds: number;
+} {
+  const cleanId = `reg_${identifier.toLowerCase().trim()}`;
+  const entry = loadEntry(cleanId);
+  const now = Date.now();
+
+  entry.attempts += 1;
+  entry.lastAttemptAt = now;
+
+  if (entry.attempts >= MAX_REGISTRATION_ATTEMPTS) {
+    entry.lockedUntil = now + REGISTRATION_LOCKOUT_MS;
+    saveEntry(cleanId, entry);
+    return {
+      isBlocked: true,
+      waitSeconds: Math.ceil(REGISTRATION_LOCKOUT_MS / 1000),
+    };
+  }
+
+  saveEntry(cleanId, entry);
+  return { isBlocked: false, waitSeconds: 0 };
+}
+
 export const ADMIN_MASTER_DEFAULT_HASH =
   '15b5eb4c0958d5f3aa4518cfb5e30ebf91dec7caee544c7fd46a8dfb57a2155c';
 
@@ -258,12 +326,13 @@ export async function hashPassword(password: string): Promise<string> {
 }
 
 /**
- * Valida a senha fornecida contra a credencial master do Administrador Geral usando hash seguro SHA-256.
+ * Valida a senha fornecida contra a credencial master do Administrador Geral usando hash seguro SHA-256
+ * com comparação em tempo constante para mitigar timing attacks.
  */
 export async function verifyAdminPassword(password: string): Promise<boolean> {
   try {
     const hash = await hashPassword(password);
-    return hash === ADMIN_MASTER_DEFAULT_HASH;
+    return timingSafeEqual(hash, ADMIN_MASTER_DEFAULT_HASH);
   } catch {
     return false;
   }

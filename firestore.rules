@@ -1,0 +1,80 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions para controle de acesso seguro (RBAC)
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdminMaster() {
+      return isAuthenticated() && 
+        (request.auth.token.email == 'ph44608@gmail.com' || request.auth.uid == 'admin-master-ph44608');
+    }
+
+    function isApprovedUser() {
+      return isAuthenticated();
+    }
+
+    // Regras para Coleção de Usuários e Permissões
+    match /usuarios/{userId} {
+      // Qualquer usuário autenticado pode ler dados de aprovação
+      allow read: if isAuthenticated();
+
+      // Um usuário pode criar seu próprio registro inicial com status pendente
+      allow create: if isAuthenticated() && (request.auth.uid == userId || isAdminMaster());
+
+      // Apenas o Administrador Geral Master pode aprovar, rejeitar ou alterar papéis
+      allow update: if isAdminMaster() || (isAuthenticated() && request.auth.uid == userId && 
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['aprovado', 'status', 'isAdminMaster', 'perfil']));
+
+      // Proibido excluir contas de usuários diretamente
+      allow delete: if isAdminMaster();
+    }
+
+    // Regras para Lotes de Produção
+    match /lotes_producao/{loteId} {
+      allow read: if isApprovedUser();
+      allow create: if isApprovedUser() && request.resource.data.quantidadeProduzida >= 0;
+      allow update: if isApprovedUser();
+      allow delete: if false; // Proibida exclusão física (apenas lógica com flag ativo: false)
+    }
+
+    // Regras para Saídas de Produção e Cargas em Banho
+    match /saidas_producao/{saidaId} {
+      allow read: if isApprovedUser();
+      allow create: if isApprovedUser() && request.resource.data.quantidade > 0;
+      allow update: if isApprovedUser();
+      allow delete: if false; // Exclusão física proibida
+    }
+
+    // Regras para Pedidos de Vendas e Logística
+    match /pedidos_vendas/{pedidoId} {
+      allow read: if isApprovedUser();
+      allow create: if isApprovedUser() && request.resource.data.totalPedidoCentavos >= 0;
+      allow update: if isApprovedUser();
+      allow delete: if false; // Exclusão física proibida
+    }
+
+    // Regras para Clientes
+    match /clientes/{clienteId} {
+      allow read: if isApprovedUser();
+      allow create: if isApprovedUser();
+      allow update: if isApprovedUser();
+      allow delete: if false;
+    }
+
+    // Regras para Logs de Auditoria (Trilha Imutável - Cloudflare Security Standard)
+    match /logs_auditoria/{logId} {
+      allow read: if isApprovedUser();
+      allow create: if isAuthenticated();
+      // Imutabilidade estrita: logs de auditoria NUNCA podem ser alterados ou apagados
+      allow update, delete: if false;
+    }
+
+    // Qualquer outra rota não especificada é bloqueada por padrão
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

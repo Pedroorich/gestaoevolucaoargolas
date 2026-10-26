@@ -14,6 +14,8 @@ import {
   checkRateLimit,
   recordFailedAttempt,
   resetRateLimit,
+  checkRegistrationRateLimit,
+  recordRegistrationAttempt,
   sanitizeEmail,
   sanitizeName,
   validatePasswordStrength,
@@ -268,9 +270,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const cleanEmail = sanitizeEmail(email);
     const cleanName = sanitizeName(nome);
 
+    // Proteção contra criação em massa e ataques de negação de serviço no registro
+    const regLimit = checkRegistrationRateLimit(cleanEmail);
+    if (regLimit.isBlocked) {
+      throw new Error(
+        `Muitas tentativas de cadastro recentes. Aguarde ${regLimit.waitSeconds} segundos antes de tentar novamente.`
+      );
+    }
+
     // Validação estrita da senha
     const strength = validatePasswordStrength(pass);
     if (!strength.isValid) {
+      recordRegistrationAttempt(cleanEmail);
       throw new Error(strength.errors[0]);
     }
 

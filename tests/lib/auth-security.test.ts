@@ -8,6 +8,10 @@ import {
   resetRateLimit,
   ADMIN_MASTER_EMAIL,
   isAdminMasterEmail,
+  timingSafeEqual,
+  sanitizeTextInput,
+  checkRegistrationRateLimit,
+  recordRegistrationAttempt,
 } from '@/lib/auth/security';
 
 describe('Módulo de Segurança e Autenticação (security.ts)', () => {
@@ -129,6 +133,65 @@ describe('Módulo de Segurança e Autenticação (security.ts)', () => {
       const check = checkRateLimit(testId);
       expect(check.isBlocked).toBe(false);
       expect(check.attemptsLeft).toBe(5);
+    });
+  });
+
+  describe('timingSafeEqual (Mitigação de Timing Attacks - Cloudflare Standard)', () => {
+    it('deve retornar true para strings idênticas em tempo constante', () => {
+      expect(timingSafeEqual('hash123456789', 'hash123456789')).toBe(true);
+      expect(timingSafeEqual('', '')).toBe(true);
+    });
+
+    it('deve retornar false para strings diferentes com mesmo comprimento', () => {
+      expect(timingSafeEqual('hash123456789', 'hash123456780')).toBe(false);
+    });
+
+    it('deve retornar false para strings de comprimentos diferentes', () => {
+      expect(timingSafeEqual('hash123', 'hash1234')).toBe(false);
+    });
+
+    it('deve retornar false se qualquer argumento não for string', () => {
+      expect(timingSafeEqual(null as any, 'teste')).toBe(false);
+      expect(timingSafeEqual('teste', undefined as any)).toBe(false);
+    });
+  });
+
+  describe('sanitizeTextInput (Proteção contra XSS e Injeções em Entradas)', () => {
+    it('deve remover tags HTML e scripts maliciosos', () => {
+      const input = '<img src=x onerror=alert(1)>Rua das Flores, 123';
+      expect(sanitizeTextInput(input)).toBe('Rua das Flores, 123');
+    });
+
+    it('deve remover caracteres de controle invisíveis', () => {
+      const input = 'Texto\u0000Com\u001FControle';
+      expect(sanitizeTextInput(input)).toBe('TextoComControle');
+    });
+
+    it('deve respeitar o limite máximo de caracteres (maxLength)', () => {
+      const input = 'a'.repeat(600);
+      expect(sanitizeTextInput(input, 100).length).toBe(100);
+    });
+
+    it('deve lidar com null e undefined graciosamente', () => {
+      expect(sanitizeTextInput(null)).toBe('');
+      expect(sanitizeTextInput(undefined)).toBe('');
+    });
+  });
+
+  describe('Rate Limiting de Criação de Contas (Proteção contra DoS e Spam)', () => {
+    const regId = 'novo-cadastro-bot@teste.com';
+
+    it('deve bloquear após 3 tentativas de cadastro em curto período', () => {
+      recordRegistrationAttempt(regId);
+      recordRegistrationAttempt(regId);
+      const third = recordRegistrationAttempt(regId);
+
+      expect(third.isBlocked).toBe(true);
+      expect(third.waitSeconds).toBeGreaterThan(0);
+
+      const check = checkRegistrationRateLimit(regId);
+      expect(check.isBlocked).toBe(true);
+      expect(check.waitSeconds).toBeGreaterThan(0);
     });
   });
 });
