@@ -8,10 +8,12 @@ import {
   getDoc,
   setDoc,
   updateDoc,
+  deleteDoc,
   collection,
   getDocs,
   query,
   orderBy,
+  where,
 } from 'firebase/firestore';
 import { db } from './client';
 import { PerfilUsuario, Usuario, StatusUsuario } from '@/types/domain';
@@ -32,6 +34,7 @@ export interface CriarUsuarioParams {
   email: string;
   nome: string;
   perfilDesejado?: PerfilUsuario;
+  passwordHash?: string;
 }
 
 /**
@@ -60,6 +63,7 @@ export function buildInitialUserData(params: CriarUsuarioParams): Usuario {
       aprovadoPor: 'sistema-auto',
       aprovadoEm: now,
       doisFatoresAtivo: false,
+      passwordHash: params.passwordHash,
     };
   }
 
@@ -76,6 +80,7 @@ export function buildInitialUserData(params: CriarUsuarioParams): Usuario {
     aprovadoPor: null,
     aprovadoEm: null,
     doisFatoresAtivo: false,
+    passwordHash: params.passwordHash,
   };
 }
 
@@ -91,6 +96,20 @@ export async function salvarPerfilUsuario(userData: Usuario): Promise<void> {
   } finally {
     salvarNoLocalStorage('usuarios', userData);
   }
+}
+
+/**
+ * Atualiza o hash de senha de um usuário no Firestore e no fallback local.
+ */
+export async function atualizarSenhaUsuario(uid: string, passwordHash: string): Promise<void> {
+  const alteracoes: Partial<Usuario> = { passwordHash };
+  try {
+    const userDocRef = doc(db, 'usuarios', uid);
+    await updateDoc(userDocRef, alteracoes);
+  } catch (err: any) {
+    console.warn('Aviso Firestore ao atualizar senha do usuário:', err?.message || err);
+  }
+  atualizarNoLocalStorage<Usuario>('usuarios', uid, alteracoes);
 }
 
 /**
@@ -110,6 +129,64 @@ export async function buscarUsuarioPorId(uid: string): Promise<Usuario | null> {
   const localList = buscarDoLocalStorage<Usuario>('usuarios');
   const found = localList.find((u) => u.id === uid);
   return found || null;
+}
+
+/**
+ * Busca um usuário pelo endereço de e-mail (usado no login seguro e validação de duplicidade).
+ * Prioriza contas ativas e aprovadas, ordenadas pela data mais recente.
+ */
+export async function buscarUsuarioPorEmail(email: string): Promise<Usuario | null> {
+  const cleanEmail = sanitizeEmail(email);
+
+  try {
+    const usersCol = collection(db, 'usuarios');
+    const snap = await getDocs(usersCol);
+    if (!snap.empty) {
+      const docs = snap.docs
+        .map((d) => d.data() as Usuario)
+        .filter((u) => u.email && u.email.trim().toLowerCase() === cleanEmail);
+
+      if (docs.length > 0) {
+        docs.sort((a, b) => {
+          // Prioridade 1: aprovado e ativo
+          if (a.aprovado && a.ativo && (!b.aprovado || !b.ativo)) return -1;
+          if (b.aprovado && b.ativo && (!a.aprovado || !a.ativo)) return 1;
+          // Prioridade 2: mais recente
+          return new Date(b.criadoEm).getTime() - new Date(a.criadoEm).getTime();
+        });
+        return docs[0];
+      }
+    }
+  } catch (err: any) {
+    console.warn('Aviso Firestore ao buscar usuário por e-mail:', err?.message || err);
+  }
+
+  const localList = buscarDoLocalStorage<Usuario>('usuarios');
+  const matched = localList.filter(
+    (u) => u.email && u.email.trim().toLowerCase() === cleanEmail
+  );
+  if (matched.length > 0) {
+    matched.sort((a, b) => {
+      if (a.aprovado && a.ativo && (!b.aprovado || !b.ativo)) return -1;
+      if (b.aprovado && b.ativo && (!a.aprovado || !a.ativo)) return 1;
+      return new Date(b.criadoEm).getTime() - new Date(a.criadoEm).getTime();
+    });
+    return matched[0];
+  }
+
+  return null;
+}
+
+/**
+ * Exclui uma conta de usuário do Firestore e local storage (ex: duplicatas inativas).
+ */
+export async function excluirUsuario(uid: string): Promise<void> {
+  try {
+    const userDocRef = doc(db, 'usuarios', uid);
+    await deleteDoc(userDocRef);
+  } catch (err: any) {
+    console.warn('Aviso Firestore ao excluir usuário:', err?.message || err);
+  }
 }
 
 /**

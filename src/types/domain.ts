@@ -20,6 +20,7 @@ export interface Usuario {
   aprovadoPor?: string | null;
   aprovadoEm?: string | null;
   motivoRejeicao?: string | null;
+  passwordHash?: string;
 }
 
 export type ModeloArgolaId =

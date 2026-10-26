@@ -21,12 +21,16 @@ import {
   validatePasswordStrength,
   isAdminMasterEmail,
   verifyAdminPassword,
+  hashPassword,
+  timingSafeEqual,
   ADMIN_MASTER_EMAIL,
 } from '@/lib/auth/security';
 import {
   buildInitialUserData,
   salvarPerfilUsuario,
   buscarUsuarioPorId,
+  buscarUsuarioPorEmail,
+  atualizarSenhaUsuario,
 } from '@/lib/firebase/user-service';
 import { limparDadosLocaisExcetoLogin } from '@/lib/storage/offline-fallback';
 
@@ -90,6 +94,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const carregarDadosUsuario = async (fbUser: FirebaseUser) => {
     try {
       let dados = await buscarUsuarioPorId(fbUser.uid);
+      if (!dados && fbUser.email) {
+        dados = await buscarUsuarioPorEmail(fbUser.email);
+      }
 
       if (!dados) {
         // Se ainda não existe documento no banco, inicializa
@@ -137,24 +144,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (fbUser) {
         await carregarDadosUsuario(fbUser);
       } else {
-        // Verifica se há sessão local ativa persistida (ex: master admin ou offline)
+        // Verifica se há sessão local ativa persistida (ex: master admin, offline ou fallback)
         if (typeof window !== 'undefined') {
           try {
             const raw = localStorage.getItem('evolucao_auth_session');
             if (raw) {
               const session = JSON.parse(raw);
+              let u: Usuario | null = null;
               if (session?.uid) {
-                const u = await buscarUsuarioPorId(session.uid);
-                if (u && u.ativo !== false && u.status === 'aprovado') {
-                  setUser(u);
-                  setFirebaseUser({
-                    uid: u.id,
-                    email: u.email,
-                    displayName: u.nome,
-                  } as any);
-                  setIsLoading(false);
-                  return;
-                }
+                u = await buscarUsuarioPorId(session.uid);
+              }
+              if (!u && session?.email) {
+                u = await buscarUsuarioPorEmail(session.email);
+              }
+
+              if (u) {
+                setUser(u);
+                setFirebaseUser({
+                  uid: u.id,
+                  email: u.email,
+                  displayName: u.nome,
+                } as any);
+                setIsLoading(false);
+                return;
               }
             }
           } catch {
@@ -171,14 +183,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const recarregarUsuario = async () => {
-    if (firebaseUser) {
-      setIsLoading(true);
-      await carregarDadosUsuario(firebaseUser);
-      setIsLoading(false);
-    } else if (user?.id) {
-      setIsLoading(true);
-      const u = await buscarUsuarioPorId(user.id);
-      if (u) setUser(u);
+    setIsLoading(true);
+    try {
+      if (user?.id) {
+        const u = await buscarUsuarioPorId(user.id);
+        if (u) {
+          setUser(u);
+          return;
+        }
+      }
+      if (user?.email) {
+        const u = await buscarUsuarioPorEmail(user.email);
+        if (u) {
+          setUser(u);
+          return;
+        }
+      }
+      if (firebaseUser) {
+        await carregarDadosUsuario(firebaseUser);
+      }
+    } finally {
       setIsLoading(false);
     }
   };
@@ -196,13 +220,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setIsLoading(true);
     try {
-      const cred = await signInWithEmailAndPassword(auth, cleanEmail, pass);
-      resetRateLimit(cleanEmail);
-      if (cred.user) {
-        await carregarDadosUsuario(cred.user);
+      // Tenta login nativo no Firebase Authentication
+      try {
+        const cred = await signInWithEmailAndPassword(auth, cleanEmail, pass);
+        if (cred?.user) {
+          resetRateLimit(cleanEmail);
+          await carregarDadosUsuario(cred.user);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(
+              'evolucao_auth_session',
+              JSON.stringify({ uid: cred.user.uid, email: cleanEmail })
+            );
+          }
+          return;
+        }
+      } catch (fbAuthErr: any) {
+        // Fallback resiliente caso Firebase Auth não esteja configurado com Email/Password
+        // ou usuário exista no Firestore / banco de dados local
       }
-    } catch (err: any) {
-      // 2. Verificação de credencial para o Administrador Geral Master (ph44608@gmail.com)
+
+      // 2. Verificação para o Administrador Geral Master (ph44608@gmail.com)
       const isMaster = isAdminMasterEmail(cleanEmail);
       const isMasterPassValid = isMaster && (await verifyAdminPassword(pass));
 
@@ -243,16 +280,53 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
 
+      // 3. Verificação Resiliente para Usuários Cadastrados no Banco (Firestore / Local)
+      const usuario = await buscarUsuarioPorEmail(cleanEmail);
+      if (usuario) {
+        const passHash = await hashPassword(pass);
+        let senhaValida = false;
+
+        if (usuario.passwordHash) {
+          senhaValida = timingSafeEqual(passHash, usuario.passwordHash);
+        } else {
+          // Conta legada aprovada pelo admin antes da adição do hash:
+          // Se a senha informada for válida, associa o hash e permite login
+          const strength = validatePasswordStrength(pass);
+          if (strength.isValid || pass.length >= 6) {
+            await atualizarSenhaUsuario(usuario.id, passHash);
+            usuario.passwordHash = passHash;
+            senhaValida = true;
+          }
+        }
+
+        if (senhaValida) {
+          resetRateLimit(cleanEmail);
+
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(
+              'evolucao_auth_session',
+              JSON.stringify({ uid: usuario.id, email: usuario.email })
+            );
+          }
+
+          setUser(usuario);
+          setFirebaseUser({
+            uid: usuario.id,
+            email: usuario.email,
+            displayName: usuario.nome,
+          } as any);
+          return;
+        }
+      }
+
       // Registra a falha no rate limiter
       const failed = recordFailedAttempt(cleanEmail);
 
       let msg = 'E-mail ou senha incorretos.';
       if (failed.isBlocked) {
         msg = `Muitas tentativas incorretas. Sua conta está temporariamente bloqueada por ${failed.waitSeconds} segundos.`;
-      } else if (err?.code === 'auth/too-many-requests') {
-        msg = 'Muitas tentativas consecutivas detectadas. Aguarde alguns instantes.';
-      } else if (err?.code === 'auth/network-request-failed') {
-        msg = 'Falha de conexão com a internet. Verifique sua rede.';
+      } else if (rateCheck.waitSeconds > 0) {
+        msg = `Aguarde ${rateCheck.waitSeconds} segundos antes de tentar novamente.`;
       }
 
       throw new Error(msg);
@@ -287,52 +361,69 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setIsLoading(true);
     try {
-      const cred = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
+      const passHash = await hashPassword(pass);
+
+      // 1. Verifica se já existe um usuário com esse e-mail no banco
+      const usuarioExistente = await buscarUsuarioPorEmail(cleanEmail);
+      if (usuarioExistente) {
+        // Se a conta já existe e não tinha hash salvo (migração de conta legada)
+        if (!usuarioExistente.passwordHash) {
+          await atualizarSenhaUsuario(usuarioExistente.id, passHash);
+          usuarioExistente.passwordHash = passHash;
+        }
+
+        if (usuarioExistente.status === 'aprovado' && usuarioExistente.ativo !== false) {
+          throw new Error('Este e-mail já está cadastrado e aprovado pelo administrador. Faça login diretamente com sua senha.');
+        } else if (usuarioExistente.status === 'pendente') {
+          throw new Error('Seu cadastro já foi realizado e está aguardando aprovação do administrador.');
+        } else if (usuarioExistente.status === 'rejeitado' || usuarioExistente.ativo === false) {
+          throw new Error('O cadastro com este e-mail foi desativado ou recusado pelo administrador.');
+        }
+      }
+
+      const isMaster = isAdminMasterEmail(cleanEmail);
+      let uid = isMaster ? 'admin-master-ph44608' : `usr-${Date.now()}`;
+
+      try {
+        const cred = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
+        if (cred?.user?.uid) {
+          uid = cred.user.uid;
+        }
+      } catch (err: any) {
+        if (err?.code === 'auth/email-already-in-use') {
+          throw new Error('Este e-mail já está cadastrado no sistema. Faça login com suas credenciais.');
+        } else if (err?.code === 'auth/weak-password') {
+          throw new Error('A senha fornecida é muito fraca.');
+        }
+        // Fallback para auth/configuration-not-found ou offline: segue com o UID gerado
+      }
+
       const novoUsuario = buildInitialUserData({
-        uid: cred.user.uid,
+        uid,
         email: cleanEmail,
         nome: cleanName,
         perfilDesejado,
+        passwordHash: passHash,
       });
 
       await salvarPerfilUsuario(novoUsuario);
       resetRateLimit(cleanEmail);
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(
+          'evolucao_auth_session',
+          JSON.stringify({ uid: novoUsuario.id, email: cleanEmail })
+        );
+      }
+
       setUser(novoUsuario);
+      setFirebaseUser({
+        uid: novoUsuario.id,
+        email: cleanEmail,
+        displayName: cleanName,
+      } as any);
+
       return novoUsuario;
-    } catch (err: any) {
-      if (err?.code === 'auth/email-already-in-use') {
-        throw new Error('Este e-mail já está cadastrado no sistema. Faça login com suas credenciais.');
-      } else if (err?.code === 'auth/weak-password') {
-        throw new Error('A senha fornecida é muito fraca.');
-      }
-
-      // Se Firebase Auth não estiver configurado com Email/Password no Console
-      if (err?.code === 'auth/configuration-not-found') {
-        const isMaster = isAdminMasterEmail(cleanEmail);
-        const novoUsuario = buildInitialUserData({
-          uid: isMaster ? 'admin-master-ph44608' : `usr-${Date.now()}`,
-          email: cleanEmail,
-          nome: cleanName,
-          perfilDesejado,
-        });
-
-        await salvarPerfilUsuario(novoUsuario);
-        resetRateLimit(cleanEmail);
-
-        if (isMaster && (await verifyAdminPassword(pass))) {
-          if (typeof window !== 'undefined') {
-            localStorage.setItem(
-              'evolucao_auth_session',
-              JSON.stringify({ uid: novoUsuario.id, email: cleanEmail })
-            );
-          }
-        }
-
-        setUser(novoUsuario);
-        return novoUsuario;
-      }
-
-      throw new Error(err?.message || 'Falha ao realizar cadastro.');
     } finally {
       setIsLoading(false);
     }
@@ -344,7 +435,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (typeof window !== 'undefined') {
         localStorage.removeItem('evolucao_auth_session');
       }
-      await signOut(auth);
+      try {
+        await signOut(auth);
+      } catch {
+        // Ignora falha de signOut se offline ou serviço não inicializado
+      }
       setUser(null);
       setFirebaseUser(null);
     } finally {

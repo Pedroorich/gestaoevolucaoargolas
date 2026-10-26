@@ -27,7 +27,7 @@ vi.mock('@/lib/firebase/client', () => ({
 }));
 
 vi.mock('@/lib/firebase/user-service', () => ({
-  buildInitialUserData: vi.fn(({ uid, email, nome, perfilDesejado }) => {
+  buildInitialUserData: vi.fn(({ uid, email, nome, perfilDesejado, passwordHash }) => {
     const isMaster = email.toLowerCase().includes('ph44608@gmail.com');
     return {
       id: uid,
@@ -41,9 +41,12 @@ vi.mock('@/lib/firebase/user-service', () => ({
       criadoEm: new Date().toISOString(),
       aprovadoPor: isMaster ? 'sistema-auto' : null,
       aprovadoEm: isMaster ? new Date().toISOString() : null,
+      passwordHash,
     };
   }),
   salvarPerfilUsuario: vi.fn(() => Promise.resolve()),
+  atualizarSenhaUsuario: vi.fn(() => Promise.resolve()),
+  buscarUsuarioPorEmail: vi.fn(() => Promise.resolve(null)),
   buscarUsuarioPorId: vi.fn((uid) =>
     Promise.resolve({
       id: uid,
@@ -132,5 +135,103 @@ describe('AuthContext com Segurança e Aprovação', () => {
     expect(createdAdmin.status).toBe('aprovado');
     expect(createdAdmin.aprovado).toBe(true);
     expect(createdAdmin.isAdminMaster).toBe(true);
+  });
+
+  it('deve permitir que usuário regular aprovado faça login com credenciais corretas', async () => {
+    const { buscarUsuarioPorEmail } = await import('@/lib/firebase/user-service');
+    const { hashPassword } = await import('@/lib/auth/security');
+
+    const senhaCorreta = 'SenhaForte@2026!';
+    const passHash = await hashPassword(senhaCorreta);
+
+    const usuarioAprovado = {
+      id: 'usr-aprovado-1',
+      nome: 'Marco Aurélio',
+      email: 'marco@evolucao.com',
+      perfil: 'gestao' as const,
+      status: 'aprovado' as const,
+      aprovado: true,
+      ativo: true,
+      criadoEm: '2026-10-26T10:00:00.000Z',
+      passwordHash: passHash,
+    };
+
+    vi.mocked(buscarUsuarioPorEmail).mockResolvedValueOnce(usuarioAprovado);
+    mockSignIn.mockRejectedValueOnce({ code: 'auth/configuration-not-found' });
+
+    const { result } = renderHook(() => useAuthContext(), { wrapper });
+
+    await act(async () => {
+      await result.current.login('marco@evolucao.com', senhaCorreta);
+    });
+
+    expect(result.current.user).toBeDefined();
+    expect(result.current.user?.email).toBe('marco@evolucao.com');
+    expect(result.current.isAprovado).toBe(true);
+    expect(result.current.perfil).toBe('gestao');
+  });
+
+  it('deve rejeitar login com senha incorreta para conta aprovada', async () => {
+    const { buscarUsuarioPorEmail } = await import('@/lib/firebase/user-service');
+    const { hashPassword } = await import('@/lib/auth/security');
+
+    const passHash = await hashPassword('SenhaCorreta@2026!');
+
+    const usuarioAprovado = {
+      id: 'usr-aprovado-2',
+      nome: 'Pedro Teste',
+      email: 'pedro@evolucao.com',
+      perfil: 'producao' as const,
+      status: 'aprovado' as const,
+      aprovado: true,
+      ativo: true,
+      criadoEm: '2026-10-26T10:00:00.000Z',
+      passwordHash: passHash,
+    };
+
+    vi.mocked(buscarUsuarioPorEmail).mockResolvedValueOnce(usuarioAprovado);
+    mockSignIn.mockRejectedValueOnce({ code: 'auth/invalid-credential' });
+
+    const { result } = renderHook(() => useAuthContext(), { wrapper });
+
+    await expect(
+      result.current.login('pedro@evolucao.com', 'SenhaErrada@999!')
+    ).rejects.toThrow('E-mail ou senha incorretos.');
+  });
+
+  it('deve impedir recadastro de e-mail já cadastrado e aprovado', async () => {
+    const { buscarUsuarioPorEmail } = await import('@/lib/firebase/user-service');
+
+    const usuarioExistente = {
+      id: 'usr-existente',
+      nome: 'Marco Existente',
+      email: 'marco@existente.com',
+      perfil: 'gestao' as const,
+      status: 'aprovado' as const,
+      aprovado: true,
+      ativo: true,
+      criadoEm: '2026-10-26T10:00:00.000Z',
+      passwordHash: 'hash-mock',
+    };
+
+    vi.mocked(buscarUsuarioPorEmail).mockResolvedValueOnce(usuarioExistente);
+
+    const { result } = renderHook(() => useAuthContext(), { wrapper });
+
+    await expect(
+      result.current.cadastrar('Marco', 'marco@existente.com', 'SenhaNova@2026!', 'gestao')
+    ).rejects.toThrow('Este e-mail já está cadastrado e aprovado');
+  });
+
+  it('deve deslogar usuário ao acionar logout', async () => {
+    const { result } = renderHook(() => useAuthContext(), { wrapper });
+
+    await act(async () => {
+      await result.current.logout();
+    });
+
+    expect(result.current.user).toBeNull();
+    expect(result.current.firebaseUser).toBeNull();
+    expect(result.current.isAprovado).toBe(false);
   });
 });

@@ -103,4 +103,22 @@ describe('Serviço de Gestão de Usuários (user-service.ts)', () => {
       expect(ativo.ativo).toBe(true);
     });
   });
+
+  describe('buscarUsuarioPorEmail e atualizarSenhaUsuario', () => {
+    it('deve atualizar a senha do usuário com sucesso', async () => {
+      const { atualizarSenhaUsuario } = await import('@/lib/firebase/user-service');
+      await expect(atualizarSenhaUsuario('uid-user-456', 'hash-123456')).resolves.toBeUndefined();
+    });
+
+    it('deve excluir usuário com sucesso', async () => {
+      const { excluirUsuario } = await import('@/lib/firebase/user-service');
+      await expect(excluirUsuario('uid-user-dup')).resolves.toBeUndefined();
+    });
+
+    it('deve buscar usuário por email retornando null quando não encontrado', async () => {
+      const { buscarUsuarioPorEmail } = await import('@/lib/firebase/user-service');
+      const resultado = await buscarUsuarioPorEmail('inexistente@empresa.com');
+      expect(resultado).toBeNull();
+    });
+  });
 });
