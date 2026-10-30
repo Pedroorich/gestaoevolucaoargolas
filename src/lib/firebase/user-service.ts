@@ -14,6 +14,7 @@ import {
   query,
   orderBy,
   where,
+  onSnapshot,
 } from 'firebase/firestore';
 import { db } from './client';
 import { PerfilUsuario, Usuario, StatusUsuario } from '@/types/domain';
@@ -27,6 +28,7 @@ import {
   salvarNoLocalStorage,
   buscarDoLocalStorage,
   atualizarNoLocalStorage,
+  salvarColecaoCompletaNoLocalStorage,
 } from '@/lib/storage/offline-fallback';
 
 export interface CriarUsuarioParams {
@@ -190,6 +192,72 @@ export async function excluirUsuario(uid: string): Promise<void> {
 }
 
 /**
+ * Escuta em tempo real todos os usuários cadastrados no sistema (para uso do Admin Geral).
+ * Quando qualquer novo usuário se cadastrar em qualquer aparelho, ele aparece imediatamente na lista.
+ */
+export function observarUsuarios(
+  callback: (usuarios: Usuario[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  try {
+    const usersCol = collection(db, 'usuarios');
+    const q = query(usersCol, orderBy('criadoEm', 'desc'));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const items = snapshot.docs.map((d) => d.data() as Usuario);
+        salvarColecaoCompletaNoLocalStorage('usuarios', items);
+        callback(items);
+      },
+      (error) => {
+        console.warn('Aviso onSnapshot usuarios:', error?.message || error);
+        if (onError) onError(error);
+        listarUsuarios().then(callback);
+      }
+    );
+    return unsubscribe;
+  } catch (err: any) {
+    console.warn('Falha ao inicializar listener de usuarios:', err?.message || err);
+    listarUsuarios().then(callback);
+    return () => {};
+  }
+}
+
+/**
+ * Escuta em tempo real o status de aprovação de um usuário específico.
+ * Quando o Admin Geral aprova no painel, o dispositivo do usuário desbloqueia instantaneamente.
+ */
+export function observarUsuarioPorId(
+  uid: string,
+  callback: (usuario: Usuario | null) => void
+): () => void {
+  try {
+    const docRef = doc(db, 'usuarios', uid);
+    const unsubscribe = onSnapshot(
+      docRef,
+      (snap) => {
+        if (snap.exists()) {
+          const u = snap.data() as Usuario;
+          salvarNoLocalStorage('usuarios', u);
+          callback(u);
+        } else {
+          callback(null);
+        }
+      },
+      (err) => {
+        console.warn('Aviso onSnapshot usuario por ID:', err?.message || err);
+        buscarUsuarioPorId(uid).then(callback);
+      }
+    );
+    return unsubscribe;
+  } catch (err: any) {
+    console.warn('Falha ao escutar usuario por ID:', err?.message || err);
+    buscarUsuarioPorId(uid).then(callback);
+    return () => {};
+  }
+}
+
+/**
  * Lista todos os usuários cadastrados no sistema (para uso do Admin Geral).
  */
 export async function listarUsuarios(): Promise<Usuario[]> {
@@ -199,6 +267,7 @@ export async function listarUsuarios(): Promise<Usuario[]> {
     const snap = await getDocs(q);
     if (!snap.empty) {
       const items = snap.docs.map((d) => d.data() as Usuario);
+      salvarColecaoCompletaNoLocalStorage('usuarios', items);
       return items;
     }
   } catch (err: any) {

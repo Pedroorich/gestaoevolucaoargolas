@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, HelpCircle, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { listarPedidosVendas } from '@/lib/firebase/vendas-service';
+import { listarPedidosVendas, observarPedidosVendas } from '@/lib/firebase/vendas-service';
 import { PedidoVenda } from '@/types/domain';
 import {
   calcularMetricasLucro,
@@ -34,7 +34,22 @@ export default function PainelLucroPage() {
   };
 
   useEffect(() => {
+    let ativo = true;
     carregarDados();
+
+    let unsub: (() => void) | undefined;
+    if (typeof observarPedidosVendas === 'function') {
+      unsub = observarPedidosVendas((novosPedidos) => {
+        if (!ativo) return;
+        setPedidos(novosPedidos);
+        setCarregando(false);
+      });
+    }
+
+    return () => {
+      ativo = false;
+      if (unsub) unsub();
+    };
   }, []);
 
   const pedidosFiltrados = filtrarPorPeriodo(pedidos, periodo);

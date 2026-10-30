@@ -16,6 +16,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import {
   listarClientesCompleto,
+  observarClientes,
   cadastrarClienteRapido,
 } from '@/lib/firebase/vendas-service';
 import { Cliente } from '@/types/domain';
@@ -43,7 +44,22 @@ export default function ClientesGestaoPage() {
   };
 
   useEffect(() => {
+    let ativo = true;
     carregar();
+
+    let unsub: (() => void) | undefined;
+    if (typeof observarClientes === 'function') {
+      unsub = observarClientes((novosClientes) => {
+        if (!ativo) return;
+        setClientes(novosClientes);
+        setCarregando(false);
+      });
+    }
+
+    return () => {
+      ativo = false;
+      if (unsub) unsub();
+    };
   }, []);
 
   const handleCadastrar = async (e: React.FormEvent) => {

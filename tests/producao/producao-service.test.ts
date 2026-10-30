@@ -2,8 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   criarLote,
   listarLotesAtivos,
+  observarLotesAtivos,
   criarSaida,
   listarSaidasAtivas,
+  observarSaidasAtivas,
   excluirLoteLogico,
 } from "@/lib/firebase/producao-service";
 
@@ -24,6 +26,7 @@ vi.mock("firebase/firestore", () => ({
   updateDoc: (...args: any[]) => mockUpdateDoc(...args),
   query: (...args: any[]) => mockQuery(...args),
   where: (...args: any[]) => mockWhere(...args),
+  onSnapshot: vi.fn(() => vi.fn()),
   serverTimestamp: () => new Date("2026-10-16T12:00:00Z"),
   getFirestore: vi.fn(),
 }));
@@ -183,6 +186,20 @@ describe("Serviço Firestore de Produção e Auditoria", () => {
       expect(saidas).toHaveLength(1);
       expect(saidas[0].id).toBe("saida-1");
       expect(mockWhere).toHaveBeenCalledWith("ativo", "==", true);
+    });
+  });
+
+  describe("observarLotesAtivos e observarSaidasAtivas", () => {
+    it("deve registrar listener em tempo real para lotes e retornar funcao unsubscribe", () => {
+      const callback = vi.fn();
+      const unsub = observarLotesAtivos(callback);
+      expect(typeof unsub).toBe("function");
+    });
+
+    it("deve registrar listener em tempo real para saídas e retornar funcao unsubscribe", () => {
+      const callback = vi.fn();
+      const unsub = observarSaidasAtivas(callback);
+      expect(typeof unsub).toBe("function");
     });
   });
 

@@ -31,6 +31,7 @@ import {
   buscarUsuarioPorId,
   buscarUsuarioPorEmail,
   atualizarSenhaUsuario,
+  observarUsuarioPorId,
 } from '@/lib/firebase/user-service';
 import { limparDadosLocaisExcetoLogin } from '@/lib/storage/offline-fallback';
 
@@ -181,6 +182,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return () => unsubscribe();
   }, []);
+
+  // Escuta em tempo real atualizações no status do usuário (ex: liberação de aprovação pelo ADM em outro dispositivo)
+  useEffect(() => {
+    if (!user?.id || user.aprovado) return;
+
+    let unsub: (() => void) | undefined;
+    if (typeof observarUsuarioPorId === 'function') {
+      unsub = observarUsuarioPorId(user.id, (usuarioAtualizado) => {
+        if (usuarioAtualizado) {
+          setUser(usuarioAtualizado);
+        }
+      });
+    }
+
+    return () => {
+      if (unsub) unsub();
+    };
+  }, [user?.id, user?.aprovado]);
 
   const recarregarUsuario = async () => {
     setIsLoading(true);

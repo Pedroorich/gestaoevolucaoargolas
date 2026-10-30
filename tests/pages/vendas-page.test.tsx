@@ -27,6 +27,8 @@ vi.mock("@/hooks/useAuth", () => ({
 vi.mock("@/lib/firebase/vendas-service", () => ({
   listarPedidosVendas: vi.fn(),
   listarClientesParaVenda: vi.fn(),
+  observarPedidosVendas: vi.fn(() => vi.fn()),
+  observarClientes: vi.fn(() => vi.fn()),
   criarPedidoVenda: vi.fn(),
   atualizarSituacaoPedido: vi.fn(),
   cadastrarClienteRapido: vi.fn(),
@@ -35,6 +37,7 @@ vi.mock("@/lib/firebase/vendas-service", () => ({
 
 vi.mock("@/lib/firebase/producao-service", () => ({
   listarSaidasAtivas: vi.fn(),
+  observarSaidasAtivas: vi.fn(() => vi.fn()),
 }));
 
 describe("Página de Logística e Vendas (/vendas)", () => {

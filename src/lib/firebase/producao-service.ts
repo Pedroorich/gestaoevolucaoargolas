@@ -7,6 +7,7 @@ import {
   query,
   where,
   serverTimestamp,
+  onSnapshot,
 } from "firebase/firestore";
 import { db } from "./client";
 import { LoteProducao, SaidaProducao, LogAuditoria, DestinoSaida, StatusBanho, TipoEnvio } from "@/types/domain";
@@ -16,6 +17,7 @@ import {
   salvarNoLocalStorage,
   buscarDoLocalStorage,
   atualizarNoLocalStorage,
+  salvarColecaoCompletaNoLocalStorage,
 } from "@/lib/storage/offline-fallback";
 import { sanitizeTextInput } from "@/lib/auth/security";
 
@@ -126,51 +128,90 @@ export async function criarLote(
 }
 
 /**
+ * Converte um snapshot de documento Firestore para a interface LoteProducao com tratamento seguro de datas.
+ */
+export function converterLoteDoc(docSnap: any): LoteProducao {
+  const data = docSnap.data();
+  return {
+    id: docSnap.id,
+    data: data.data?.toDate
+      ? data.data.toDate()
+      : data.data
+      ? new Date(data.data)
+      : new Date(),
+    modeloId: data.modeloId,
+    quantidadeProduzida: data.quantidadeProduzida,
+    pesoKg: data.pesoKg ?? null,
+    perdas: data.perdas || 0,
+    custoMaterialCentavos: data.custoMaterialCentavos,
+    custoUnitarioCentavos: data.custoUnitarioCentavos,
+    observacoes: data.observacoes || "",
+    responsavelId: data.responsavelId,
+    ativo: data.ativo !== false,
+    criadoEm: data.criadoEm?.toDate
+      ? data.criadoEm.toDate()
+      : data.criadoEm
+      ? new Date(data.criadoEm)
+      : new Date(),
+    atualizadoEm: data.atualizadoEm?.toDate
+      ? data.atualizadoEm.toDate()
+      : data.atualizadoEm
+      ? new Date(data.atualizadoEm)
+      : new Date(),
+  } as LoteProducao;
+}
+
+/**
+ * Escuta alterações de lotes ativos em tempo real (multi-dispositivos).
+ * Sempre que qualquer aparelho registrar, editar ou excluir um lote,
+ * todos os dispositivos conectados recebem a atualização instantaneamente.
+ */
+export function observarLotesAtivos(
+  callback: (lotes: LoteProducao[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  try {
+    const q = query(collection(db, "lotes_producao"), where("ativo", "==", true));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const lotes = snapshot.docs.map(converterLoteDoc);
+        lotes.sort((a, b) => b.data.getTime() - a.data.getTime());
+        salvarColecaoCompletaNoLocalStorage("lotes_producao", lotes);
+        callback(lotes);
+      },
+      (error) => {
+        console.warn("Aviso onSnapshot lotes_producao:", error?.message || error);
+        if (onError) onError(error);
+        listarLotesAtivos().then(callback);
+      }
+    );
+    return unsubscribe;
+  } catch (err: any) {
+    console.warn("Falha ao inicializar listener de lotes:", err?.message || err);
+    listarLotesAtivos().then(callback);
+    return () => {};
+  }
+}
+
+/**
  * Retorna todos os lotes ativos do sistema ordenados do mais recente para o mais antigo.
  */
 export async function listarLotesAtivos(): Promise<LoteProducao[]> {
-  let lotesNuvem: LoteProducao[] = [];
-
   try {
     const q = query(collection(db, "lotes_producao"), where("ativo", "==", true));
     const snapshot = await getDocs(q);
 
-    lotesNuvem = snapshot.docs.map((docSnap) => {
-      const data = docSnap.data();
-      return {
-        id: docSnap.id,
-        data: data.data?.toDate
-          ? data.data.toDate()
-          : data.data
-          ? new Date(data.data)
-          : new Date(),
-        modeloId: data.modeloId,
-        quantidadeProduzida: data.quantidadeProduzida,
-        pesoKg: data.pesoKg ?? null,
-        perdas: data.perdas || 0,
-        custoMaterialCentavos: data.custoMaterialCentavos,
-        custoUnitarioCentavos: data.custoUnitarioCentavos,
-        observacoes: data.observacoes || "",
-        responsavelId: data.responsavelId,
-        ativo: data.ativo,
-        criadoEm: data.criadoEm?.toDate
-          ? data.criadoEm.toDate()
-          : data.criadoEm
-          ? new Date(data.criadoEm)
-          : new Date(),
-        atualizadoEm: data.atualizadoEm?.toDate
-          ? data.atualizadoEm.toDate()
-          : data.atualizadoEm
-          ? new Date(data.atualizadoEm)
-          : new Date(),
-      } as LoteProducao;
-    });
+    const lotesNuvem = snapshot.docs.map(converterLoteDoc);
+    lotesNuvem.sort((a, b) => b.data.getTime() - a.data.getTime());
+    salvarColecaoCompletaNoLocalStorage("lotes_producao", lotesNuvem);
+    return lotesNuvem;
   } catch (err: any) {
     console.warn("Aviso Firestore ao listar lotes:", err.message);
   }
 
   const lotesLocais = buscarDoLocalStorage<any>("lotes_producao")
-    .filter((l) => l.ativo)
+    .filter((l) => l.ativo !== false)
     .map((l) => ({
       ...l,
       data: new Date(l.data),
@@ -178,12 +219,7 @@ export async function listarLotesAtivos(): Promise<LoteProducao[]> {
       atualizadoEm: new Date(l.atualizadoEm),
     }));
 
-  const mapLotes = new Map<string, LoteProducao>();
-  for (const l of lotesLocais) mapLotes.set(l.id, l);
-  for (const l of lotesNuvem) mapLotes.set(l.id, l);
-
-  const todosLotes = Array.from(mapLotes.values());
-  return todosLotes.sort((a, b) => b.data.getTime() - a.data.getTime());
+  return lotesLocais.sort((a, b) => b.data.getTime() - a.data.getTime());
 }
 
 /**
@@ -293,45 +329,82 @@ export async function concluirBanhoRemessa(
 }
 
 /**
+ * Converte um snapshot de documento Firestore para a interface SaidaProducao com tratamento seguro de datas.
+ */
+export function converterSaidaDoc(docSnap: any): SaidaProducao {
+  const data = docSnap.data();
+  return {
+    id: docSnap.id,
+    loteId: data.loteId,
+    modeloId: data.modeloId,
+    quantidade: data.quantidade,
+    transporte: data.transporte,
+    destino: (data.destino as DestinoSaida) || "centro_logistica",
+    statusBanho: (data.statusBanho as StatusBanho) || "nao_aplicavel",
+    dataRetornoBanho: data.dataRetornoBanho?.toDate
+      ? data.dataRetornoBanho.toDate()
+      : data.dataRetornoBanho
+      ? new Date(data.dataRetornoBanho)
+      : null,
+    data: data.data?.toDate
+      ? data.data.toDate()
+      : data.data
+      ? new Date(data.data)
+      : new Date(),
+    responsavelId: data.responsavelId,
+    ativo: data.ativo !== false,
+  } as SaidaProducao;
+}
+
+/**
+ * Escuta alterações de saídas de produção em tempo real (multi-dispositivos).
+ * Sempre que qualquer aparelho lançar uma saída ou concluir banho, todos os dispositivos conectados
+ * atualizam imediatamente o estoque de remessas e o saldo dos lotes.
+ */
+export function observarSaidasAtivas(
+  callback: (saidas: SaidaProducao[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  try {
+    const q = query(collection(db, "saidas_producao"), where("ativo", "==", true));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const saidas = snapshot.docs.map(converterSaidaDoc);
+        salvarColecaoCompletaNoLocalStorage("saidas_producao", saidas);
+        callback(saidas);
+      },
+      (error) => {
+        console.warn("Aviso onSnapshot saidas_producao:", error?.message || error);
+        if (onError) onError(error);
+        listarSaidasAtivas().then(callback);
+      }
+    );
+    return unsubscribe;
+  } catch (err: any) {
+    console.warn("Falha ao inicializar listener de saídas:", err?.message || err);
+    listarSaidasAtivas().then(callback);
+    return () => {};
+  }
+}
+
+/**
  * Retorna todas as saídas de produção ativas.
  */
 export async function listarSaidasAtivas(): Promise<SaidaProducao[]> {
-  let saidasNuvem: SaidaProducao[] = [];
-
   try {
     const q = query(collection(db, "saidas_producao"), where("ativo", "==", true));
     const snapshot = await getDocs(q);
 
-    saidasNuvem = snapshot.docs.map((docSnap) => {
-      const data = docSnap.data();
-      return {
-        id: docSnap.id,
-        loteId: data.loteId,
-        modeloId: data.modeloId,
-        quantidade: data.quantidade,
-        transporte: data.transporte,
-        destino: (data.destino as DestinoSaida) || "centro_logistica",
-        statusBanho: (data.statusBanho as StatusBanho) || "nao_aplicavel",
-        dataRetornoBanho: data.dataRetornoBanho?.toDate
-          ? data.dataRetornoBanho.toDate()
-          : data.dataRetornoBanho
-          ? new Date(data.dataRetornoBanho)
-          : null,
-        data: data.data?.toDate
-          ? data.data.toDate()
-          : data.data
-          ? new Date(data.data)
-          : new Date(),
-        responsavelId: data.responsavelId,
-        ativo: data.ativo,
-      } as SaidaProducao;
-    });
+    const saidasNuvem = snapshot.docs.map(converterSaidaDoc);
+    salvarColecaoCompletaNoLocalStorage("saidas_producao", saidasNuvem);
+    return saidasNuvem;
   } catch (err: any) {
     console.warn("Aviso Firestore ao listar saídas:", err.message);
   }
 
   const saidasLocais = buscarDoLocalStorage<any>("saidas_producao")
-    .filter((s) => s.ativo)
+    .filter((s) => s.ativo !== false)
     .map((s) => ({
       ...s,
       destino: s.destino || "centro_logistica",
@@ -340,11 +413,7 @@ export async function listarSaidasAtivas(): Promise<SaidaProducao[]> {
       data: new Date(s.data),
     }));
 
-  const mapSaidas = new Map<string, SaidaProducao>();
-  for (const s of saidasLocais) mapSaidas.set(s.id, s);
-  for (const s of saidasNuvem) mapSaidas.set(s.id, s);
-
-  return Array.from(mapSaidas.values());
+  return saidasLocais;
 }
 
 /**

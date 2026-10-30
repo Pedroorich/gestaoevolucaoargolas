@@ -6,6 +6,8 @@ import { useAuth } from "@/hooks/useAuth";
 import {
   listarLotesAtivos,
   listarSaidasAtivas,
+  observarLotesAtivos,
+  observarSaidasAtivas,
   criarLote,
   criarSaida,
   excluirLoteLogico,
@@ -54,7 +56,36 @@ export default function ProducaoPage() {
   }, []);
 
   useEffect(() => {
+    let ativo = true;
+
+    // Carga inicial rápida
     carregarDados();
+
+    // Sincronização em tempo real entre todos os aparelhos/contas
+    let unsubLotes: (() => void) | undefined;
+    let unsubSaidas: (() => void) | undefined;
+
+    if (typeof observarLotesAtivos === "function") {
+      unsubLotes = observarLotesAtivos((novosLotes) => {
+        if (!ativo) return;
+        setLotes(novosLotes);
+        setCarregando(false);
+      });
+    }
+
+    if (typeof observarSaidasAtivas === "function") {
+      unsubSaidas = observarSaidasAtivas((novasSaidas) => {
+        if (!ativo) return;
+        setSaidas(novasSaidas);
+        setCarregando(false);
+      });
+    }
+
+    return () => {
+      ativo = false;
+      if (unsubLotes) unsubLotes();
+      if (unsubSaidas) unsubSaidas();
+    };
   }, [carregarDados]);
 
   // Cálculos dinâmicos de estoque

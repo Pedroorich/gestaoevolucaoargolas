@@ -47,6 +47,7 @@ vi.mock('@/lib/firebase/user-service', () => ({
   salvarPerfilUsuario: vi.fn(() => Promise.resolve()),
   atualizarSenhaUsuario: vi.fn(() => Promise.resolve()),
   buscarUsuarioPorEmail: vi.fn(() => Promise.resolve(null)),
+  observarUsuarioPorId: vi.fn(() => vi.fn()),
   buscarUsuarioPorId: vi.fn((uid) =>
     Promise.resolve({
       id: uid,

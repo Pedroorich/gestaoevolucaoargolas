@@ -2,9 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   criarPedidoVenda,
   listarPedidosVendas,
+  observarPedidosVendas,
   atualizarSituacaoPedido,
   cadastrarClienteRapido,
   listarClientesParaVenda,
+  observarClientes,
   excluirPedidoLogico,
   NovoPedidoInput,
 } from "@/lib/firebase/vendas-service";
@@ -31,6 +33,7 @@ vi.mock("firebase/firestore", () => ({
   where: (...args: any[]) => mockWhere(...args),
   orderBy: (...args: any[]) => mockOrderBy(...args),
   limit: (...args: any[]) => mockLimit(...args),
+  onSnapshot: vi.fn(() => vi.fn()),
   serverTimestamp: () => new Date("2026-10-16T12:00:00Z"),
   getFirestore: vi.fn(),
 }));
@@ -314,6 +317,20 @@ describe("Serviço Firestore de Vendas, Clientes e Logística", () => {
           valoresNovos: { ativo: false },
         })
       );
+    });
+  });
+
+  describe("observarPedidosVendas e observarClientes", () => {
+    it("deve registrar listener em tempo real para pedidos de vendas e retornar unsubscribe", () => {
+      const cb = vi.fn();
+      const unsub = observarPedidosVendas(cb);
+      expect(typeof unsub).toBe("function");
+    });
+
+    it("deve registrar listener em tempo real para clientes e retornar unsubscribe", () => {
+      const cb = vi.fn();
+      const unsub = observarClientes(cb);
+      expect(typeof unsub).toBe("function");
     });
   });
 });

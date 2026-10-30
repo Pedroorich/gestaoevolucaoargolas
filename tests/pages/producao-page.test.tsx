@@ -26,6 +26,8 @@ vi.mock("@/hooks/useAuth", () => ({
 vi.mock("@/lib/firebase/producao-service", () => ({
   listarLotesAtivos: vi.fn(),
   listarSaidasAtivas: vi.fn(),
+  observarLotesAtivos: vi.fn(() => vi.fn()),
+  observarSaidasAtivas: vi.fn(() => vi.fn()),
   criarLote: vi.fn(),
   criarSaida: vi.fn(),
   excluirLoteLogico: vi.fn(),

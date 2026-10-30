@@ -10,6 +10,7 @@ import {
   orderBy,
   limit,
   serverTimestamp,
+  onSnapshot,
 } from "firebase/firestore";
 import { db } from "./client";
 import {
@@ -17,6 +18,7 @@ import {
   SituacaoPedido,
   TipoEnvio,
   ItemPedidoVenda,
+  Cliente,
 } from "@/types/domain";
 import { registrarLogAuditoria } from "./producao-service";
 import {
@@ -27,6 +29,7 @@ import {
   salvarNoLocalStorage,
   buscarDoLocalStorage,
   atualizarNoLocalStorage,
+  salvarColecaoCompletaNoLocalStorage,
 } from "@/lib/storage/offline-fallback";
 import { sanitizeTextInput } from "@/lib/auth/security";
 
@@ -175,11 +178,80 @@ export async function criarPedidoVenda(
 }
 
 /**
+ * Converte um snapshot de documento Firestore para a interface PedidoVenda.
+ */
+export function converterPedidoDoc(docSnap: any): PedidoVenda {
+  const data = docSnap.data();
+  return {
+    id: docSnap.id,
+    numeroPedido: data.numeroPedido,
+    clienteId: data.clienteId,
+    clienteNome: data.clienteNome,
+    enderecoEntrega: data.enderecoEntrega || "",
+    data: data.data?.toDate ? data.data.toDate() : data.data ? new Date(data.data) : new Date(),
+    tipoEnvio: data.tipoEnvio,
+    custoFreteCentavos: data.custoFreteCentavos,
+    custoEmbalagemCentavos: data.custoEmbalagemCentavos || 0,
+    custoCombustivelCentavos: data.custoCombustivelCentavos || 0,
+    itens: data.itens || [],
+    totalItensCentavos: data.totalItensCentavos,
+    totalPedidoCentavos: data.totalPedidoCentavos,
+    totalUnidades: data.totalUnidades,
+    situacao: data.situacao,
+    observacoes: data.observacoes,
+    responsavelId: data.responsavelId,
+    ativo: data.ativo !== false,
+    criadoEm: data.criadoEm?.toDate ? data.criadoEm.toDate() : data.criadoEm ? new Date(data.criadoEm) : new Date(),
+    atualizadoEm: data.atualizadoEm?.toDate
+      ? data.atualizadoEm.toDate()
+      : data.atualizadoEm ? new Date(data.atualizadoEm) : new Date(),
+  } as PedidoVenda;
+}
+
+/**
+ * Escuta pedidos de venda em tempo real (multi-dispositivos).
+ * Sempre que um pedido for criado ou tiver sua situação alterada em qualquer dispositivo,
+ * a atualização é refletida instantaneamente para todos os usuários logados.
+ */
+export function observarPedidosVendas(
+  callback: (pedidos: PedidoVenda[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  try {
+    const q = query(
+      collection(db, "pedidos_vendas"),
+      where("ativo", "==", true)
+    );
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const pedidos = snapshot.docs.map(converterPedidoDoc);
+        pedidos.sort((a, b) => {
+          const dateA = a.data instanceof Date ? a.data.getTime() : 0;
+          const dateB = b.data instanceof Date ? b.data.getTime() : 0;
+          return dateB - dateA;
+        });
+        salvarColecaoCompletaNoLocalStorage("pedidos_vendas", pedidos);
+        callback(pedidos);
+      },
+      (error) => {
+        console.warn("Aviso onSnapshot pedidos_vendas:", error?.message || error);
+        if (onError) onError(error);
+        listarPedidosVendas().then(callback);
+      }
+    );
+    return unsubscribe;
+  } catch (err: any) {
+    console.warn("Falha ao inicializar listener de pedidos:", err?.message || err);
+    listarPedidosVendas().then(callback);
+    return () => {};
+  }
+}
+
+/**
  * Retorna todos os pedidos de venda ativos do sistema.
  */
 export async function listarPedidosVendas(): Promise<PedidoVenda[]> {
-  let pedidosNuvem: PedidoVenda[] = [];
-
   try {
     const q = query(
       collection(db, "pedidos_vendas"),
@@ -187,39 +259,20 @@ export async function listarPedidosVendas(): Promise<PedidoVenda[]> {
     );
     const snapshot = await getDocs(q);
 
-    pedidosNuvem = snapshot.docs.map((docSnap) => {
-      const data = docSnap.data();
-      return {
-        id: docSnap.id,
-        numeroPedido: data.numeroPedido,
-        clienteId: data.clienteId,
-        clienteNome: data.clienteNome,
-        enderecoEntrega: data.enderecoEntrega || "",
-        data: data.data?.toDate ? data.data.toDate() : data.data ? new Date(data.data) : new Date(),
-        tipoEnvio: data.tipoEnvio,
-        custoFreteCentavos: data.custoFreteCentavos,
-        custoEmbalagemCentavos: data.custoEmbalagemCentavos || 0,
-        custoCombustivelCentavos: data.custoCombustivelCentavos || 0,
-        itens: data.itens || [],
-        totalItensCentavos: data.totalItensCentavos,
-        totalPedidoCentavos: data.totalPedidoCentavos,
-        totalUnidades: data.totalUnidades,
-        situacao: data.situacao,
-        observacoes: data.observacoes,
-        responsavelId: data.responsavelId,
-        ativo: data.ativo,
-        criadoEm: data.criadoEm?.toDate ? data.criadoEm.toDate() : data.criadoEm ? new Date(data.criadoEm) : new Date(),
-        atualizadoEm: data.atualizadoEm?.toDate
-          ? data.atualizadoEm.toDate()
-          : data.atualizadoEm ? new Date(data.atualizadoEm) : new Date(),
-      } as PedidoVenda;
+    const pedidosNuvem = snapshot.docs.map(converterPedidoDoc);
+    pedidosNuvem.sort((a, b) => {
+      const dateA = a.data instanceof Date ? a.data.getTime() : 0;
+      const dateB = b.data instanceof Date ? b.data.getTime() : 0;
+      return dateB - dateA;
     });
+    salvarColecaoCompletaNoLocalStorage("pedidos_vendas", pedidosNuvem);
+    return pedidosNuvem;
   } catch (err: any) {
     console.warn("Aviso Firestore ao listar pedidos:", err.message);
   }
 
   const pedidosLocais = buscarDoLocalStorage<any>("pedidos_vendas")
-    .filter((p) => p.ativo)
+    .filter((p) => p.ativo !== false)
     .map((p) => ({
       ...p,
       enderecoEntrega: p.enderecoEntrega || "",
@@ -228,12 +281,7 @@ export async function listarPedidosVendas(): Promise<PedidoVenda[]> {
       atualizadoEm: new Date(p.atualizadoEm),
     }));
 
-  const mapPedidos = new Map<string, PedidoVenda>();
-  for (const p of pedidosLocais) mapPedidos.set(p.id, p);
-  for (const p of pedidosNuvem) mapPedidos.set(p.id, p);
-
-  const todosPedidos = Array.from(mapPedidos.values());
-  return todosPedidos.sort((a, b) => {
+  return pedidosLocais.sort((a, b) => {
     const dateA = a.data instanceof Date ? a.data.getTime() : 0;
     const dateB = b.data instanceof Date ? b.data.getTime() : 0;
     return dateB - dateA;
@@ -395,86 +443,106 @@ export async function cadastrarClienteRapido(
 }
 
 /**
+ * Converte um snapshot de documento Firestore para a interface Cliente.
+ */
+export function converterClienteDoc(docSnap: any): Cliente {
+  const data = docSnap.data();
+  const totalCompras = data.totalCompras || 0;
+  return {
+    id: docSnap.id,
+    nome: data.nome,
+    telefone: data.telefone || "",
+    email: data.email || "",
+    cidade: data.cidade || "São Paulo",
+    endereco: data.endereco || "",
+    cep: data.cep || "",
+    origemContato: data.origemContato || "direto",
+    totalCompras,
+    dataUltimaCompra: data.dataUltimaCompra?.toDate
+      ? data.dataUltimaCompra.toDate()
+      : data.dataUltimaCompra
+      ? new Date(data.dataUltimaCompra)
+      : null,
+    situacao: (totalCompras >= 3 ? "cliente_fiel" : data.situacao || "prospeccao") as any,
+    ativo: data.ativo !== false,
+    criadoEm: data.criadoEm?.toDate
+      ? data.criadoEm.toDate()
+      : data.criadoEm
+      ? new Date(data.criadoEm)
+      : new Date(),
+    atualizadoEm: data.atualizadoEm?.toDate
+      ? data.atualizadoEm.toDate()
+      : data.atualizadoEm
+      ? new Date(data.atualizadoEm)
+      : new Date(),
+  } as Cliente;
+}
+
+/**
+ * Escuta clientes ativos em tempo real (multi-dispositivos).
+ */
+export function observarClientes(
+  callback: (clientes: Cliente[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  try {
+    const q = query(collection(db, "clientes"), where("ativo", "==", true));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const clientes = snapshot.docs.map(converterClienteDoc);
+        clientes.sort((a, b) => a.nome.localeCompare(b.nome));
+        salvarColecaoCompletaNoLocalStorage("clientes", clientes);
+        callback(clientes);
+      },
+      (error) => {
+        console.warn("Aviso onSnapshot clientes:", error?.message || error);
+        if (onError) onError(error);
+        listarClientesCompleto().then(callback);
+      }
+    );
+    return unsubscribe;
+  } catch (err: any) {
+    console.warn("Falha ao inicializar listener de clientes:", err?.message || err);
+    listarClientesCompleto().then(callback);
+    return () => {};
+  }
+}
+
+/**
  * Retorna lista resumida de clientes ativos para o seletor de pedidos.
  */
 export async function listarClientesParaVenda(): Promise<
   Array<{ id: string; nome: string; cidade: string; telefone: string; endereco?: string }>
 > {
-  let clientesNuvem: Array<{ id: string; nome: string; cidade: string; telefone: string; endereco?: string }> = [];
-
-  try {
-    const q = query(collection(db, "clientes"), where("ativo", "==", true));
-    const snapshot = await getDocs(q);
-
-    clientesNuvem = snapshot.docs.map((docSnap) => {
-      const data = docSnap.data();
-      return {
-        id: docSnap.id,
-        nome: data.nome,
-        cidade: data.cidade || "",
-        telefone: data.telefone || "",
-        endereco: data.endereco || "",
-      };
-    });
-  } catch (err: any) {
-    console.warn("Aviso Firestore ao listar clientes:", err.message);
-  }
-
-  const clientesLocais = buscarDoLocalStorage<any>("clientes")
-    .filter((c) => c.ativo)
-    .map((c) => ({
-      id: c.id,
-      nome: c.nome,
-      cidade: c.cidade || "",
-      telefone: c.telefone || "",
-      endereco: c.endereco || "",
-    }));
-
-  const mapClientes = new Map<string, { id: string; nome: string; cidade: string; telefone: string; endereco?: string }>();
-  for (const c of clientesLocais) mapClientes.set(c.id, c);
-  for (const c of clientesNuvem) mapClientes.set(c.id, c);
-
-  return Array.from(mapClientes.values());
+  const completos = await listarClientesCompleto();
+  return completos.map((c) => ({
+    id: c.id,
+    nome: c.nome,
+    cidade: c.cidade || "",
+    telefone: c.telefone || "",
+    endereco: c.endereco || "",
+  }));
 }
 
 /**
  * Retorna todos os dados dos clientes ativos para a tela de gestão de clientes e retenção.
  */
-export async function listarClientesCompleto(): Promise<import('@/types/domain').Cliente[]> {
-  let clientesNuvem: import('@/types/domain').Cliente[] = [];
-
+export async function listarClientesCompleto(): Promise<Cliente[]> {
   try {
     const q = query(collection(db, "clientes"), where("ativo", "==", true));
     const snapshot = await getDocs(q);
 
-    clientesNuvem = snapshot.docs.map((docSnap) => {
-      const data = docSnap.data();
-      const totalCompras = data.totalCompras || 0;
-      return {
-        id: docSnap.id,
-        nome: data.nome,
-        telefone: data.telefone || "",
-        email: data.email || "",
-        cidade: data.cidade || "",
-        endereco: data.endereco || "",
-        cep: data.cep || "",
-        origemContato: data.origemContato || "direto",
-        totalCompras,
-        dataUltimaCompra: data.dataUltimaCompra?.toDate
-          ? data.dataUltimaCompra.toDate()
-          : data.dataUltimaCompra
-          ? new Date(data.dataUltimaCompra)
-          : null,
-        situacao: (totalCompras >= 3 ? "cliente_fiel" : data.situacao || "prospectado") as any,
-        ativo: data.ativo,
-      };
-    });
+    const clientesNuvem = snapshot.docs.map(converterClienteDoc);
+    clientesNuvem.sort((a, b) => a.nome.localeCompare(b.nome));
+    salvarColecaoCompletaNoLocalStorage("clientes", clientesNuvem);
+    return clientesNuvem;
   } catch (err: any) {
     console.warn("Aviso Firestore ao listar clientes completos:", err.message);
   }
 
   const clientesLocais = buscarDoLocalStorage<any>("clientes")
-    .filter((c) => c.ativo)
+    .filter((c) => c.ativo !== false)
     .map((c) => {
       const totalCompras = c.totalCompras || 0;
       return {
@@ -482,20 +550,16 @@ export async function listarClientesCompleto(): Promise<import('@/types/domain')
         nome: c.nome,
         telefone: c.telefone || "",
         email: c.email || "",
-        cidade: c.cidade || "",
+        cidade: c.cidade || "São Paulo",
         endereco: c.endereco || "",
         cep: c.cep || "",
         origemContato: c.origemContato || "direto",
         totalCompras,
         dataUltimaCompra: c.dataUltimaCompra ? new Date(c.dataUltimaCompra) : null,
-        situacao: (totalCompras >= 3 ? "cliente_fiel" : c.situacao || "prospectado") as any,
-        ativo: c.ativo,
-      };
+        situacao: (totalCompras >= 3 ? "cliente_fiel" : c.situacao || "prospeccao") as any,
+        ativo: c.ativo !== false,
+      } as Cliente;
     });
 
-  const mapClientesCompleto = new Map<string, import('@/types/domain').Cliente>();
-  for (const c of clientesLocais) mapClientesCompleto.set(c.id, c);
-  for (const c of clientesNuvem) mapClientesCompleto.set(c.id, c);
-
-  return Array.from(mapClientesCompleto.values());
+  return clientesLocais.sort((a, b) => a.nome.localeCompare(b.nome));
 }

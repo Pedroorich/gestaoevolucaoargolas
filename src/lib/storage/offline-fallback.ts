@@ -58,6 +58,19 @@ export function atualizarNoLocalStorage<T extends Record<string, any> = Record<s
   }
 }
 
+export function salvarColecaoCompletaNoLocalStorage<T>(
+  colecao: string,
+  itens: T[]
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    const chave = `evolucao_${colecao}`;
+    localStorage.setItem(chave, JSON.stringify(itens));
+  } catch (err) {
+    console.warn(`Erro ao sincronizar colecao completa no localStorage (${colecao}):`, err);
+  }
+}
+
 /**
  * Limpa todos os dados operacionais de teste armazenados localmente no navegador,
  * preservando estritamente as contas de usuário e a sessão de login.

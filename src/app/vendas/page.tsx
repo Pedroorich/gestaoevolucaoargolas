@@ -7,13 +7,15 @@ import { useAuth } from "@/hooks/useAuth";
 import {
   listarPedidosVendas,
   listarClientesParaVenda,
+  observarPedidosVendas,
+  observarClientes,
   criarPedidoVenda,
   atualizarSituacaoPedido,
   cadastrarClienteRapido,
   excluirPedidoLogico,
   NovoPedidoInput,
 } from "@/lib/firebase/vendas-service";
-import { listarSaidasAtivas } from "@/lib/firebase/producao-service";
+import { listarSaidasAtivas, observarSaidasAtivas } from "@/lib/firebase/producao-service";
 import { SaidaProducao, PedidoVenda, SituacaoPedido } from "@/types/domain";
 import Button from "@/components/ui/Button";
 import CardSaldoRemessas from "@/components/vendas/CardSaldoRemessas";
@@ -56,7 +58,53 @@ export default function VendasPage() {
   }, []);
 
   useEffect(() => {
+    let ativo = true;
+
+    // Carga inicial rápida
     carregarDados();
+
+    // Sincronização em tempo real multi-dispositivos
+    let unsubSaidas: (() => void) | undefined;
+    let unsubPedidos: (() => void) | undefined;
+    let unsubClientes: (() => void) | undefined;
+
+    if (typeof observarSaidasAtivas === "function") {
+      unsubSaidas = observarSaidasAtivas((novasSaidas) => {
+        if (!ativo) return;
+        setSaidas(novasSaidas);
+        setCarregando(false);
+      });
+    }
+
+    if (typeof observarPedidosVendas === "function") {
+      unsubPedidos = observarPedidosVendas((novosPedidos) => {
+        if (!ativo) return;
+        setPedidos(novosPedidos);
+        setCarregando(false);
+      });
+    }
+
+    if (typeof observarClientes === "function") {
+      unsubClientes = observarClientes((novosClientes) => {
+        if (!ativo) return;
+        setClientes(
+          novosClientes.map((c) => ({
+            id: c.id,
+            nome: c.nome,
+            cidade: c.cidade,
+            telefone: c.telefone,
+            endereco: c.endereco,
+          }))
+        );
+      });
+    }
+
+    return () => {
+      ativo = false;
+      if (unsubSaidas) unsubSaidas();
+      if (unsubPedidos) unsubPedidos();
+      if (unsubClientes) unsubClientes();
+    };
   }, [carregarDados]);
 
   async function handleCriarPedido(dados: NovoPedidoInput) {

@@ -16,6 +16,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { PerfilUsuario, Usuario } from '@/types/domain';
 import {
   listarUsuarios,
+  observarUsuarios,
   aprovarUsuario,
   rejeitarUsuario,
   atualizarPerfilUsuario,
@@ -53,7 +54,32 @@ export const PainelAprovacoes: React.FC = () => {
   };
 
   useEffect(() => {
+    let ativo = true;
     carregar();
+
+    let unsub: (() => void) | undefined;
+    if (typeof observarUsuarios === 'function') {
+      unsub = observarUsuarios((novosUsuarios) => {
+        if (!ativo) return;
+        setUsuarios(novosUsuarios);
+        setLoading(false);
+
+        setPerfilSelecionadoMap((prev) => {
+          const mapa = { ...prev };
+          novosUsuarios.forEach((u) => {
+            if (!mapa[u.id]) {
+              mapa[u.id] = u.perfil;
+            }
+          });
+          return mapa;
+        });
+      });
+    }
+
+    return () => {
+      ativo = false;
+      if (unsub) unsub();
+    };
   }, []);
 
   const pendentes = usuarios.filter((u) => u.status === 'pendente' || !u.aprovado);

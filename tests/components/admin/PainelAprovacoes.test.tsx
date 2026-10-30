@@ -26,6 +26,7 @@ vi.mock('@/hooks/useAuth', () => ({
 
 vi.mock('@/lib/firebase/user-service', () => ({
   listarUsuarios: vi.fn(),
+  observarUsuarios: vi.fn(() => vi.fn()),
   aprovarUsuario: vi.fn(),
   rejeitarUsuario: vi.fn(),
   atualizarPerfilUsuario: vi.fn(),

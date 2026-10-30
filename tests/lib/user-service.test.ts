@@ -18,6 +18,8 @@ vi.mock('firebase/firestore', () => ({
   doc: vi.fn((_db, _col, id) => ({ id })),
   setDoc: vi.fn(() => Promise.resolve()),
   updateDoc: vi.fn(() => Promise.resolve()),
+  deleteDoc: vi.fn(() => Promise.resolve()),
+  onSnapshot: vi.fn(() => vi.fn()),
   getDoc: vi.fn(() => Promise.resolve({ exists: () => false, data: () => null })),
   getDocs: vi.fn(() => Promise.resolve({ docs: [] })),
   collection: vi.fn((_db, col) => ({ id: col })),
@@ -119,6 +121,20 @@ describe('Serviço de Gestão de Usuários (user-service.ts)', () => {
       const { buscarUsuarioPorEmail } = await import('@/lib/firebase/user-service');
       const resultado = await buscarUsuarioPorEmail('inexistente@empresa.com');
       expect(resultado).toBeNull();
+    });
+
+    it('deve registrar listener em tempo real para usuarios com funcao unsubscribe', async () => {
+      const { observarUsuarios } = await import('@/lib/firebase/user-service');
+      const cb = vi.fn();
+      const unsub = observarUsuarios(cb);
+      expect(typeof unsub).toBe('function');
+    });
+
+    it('deve registrar listener em tempo real para usuario por ID com funcao unsubscribe', async () => {
+      const { observarUsuarioPorId } = await import('@/lib/firebase/user-service');
+      const cb = vi.fn();
+      const unsub = observarUsuarioPorId('uid-123', cb);
+      expect(typeof unsub).toBe('function');
     });
   });
 });

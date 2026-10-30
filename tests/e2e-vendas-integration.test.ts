@@ -39,6 +39,7 @@ vi.mock("firebase/firestore", () => ({
   where: (...args: any[]) => mockWhere(...args),
   orderBy: (...args: any[]) => mockOrderBy(...args),
   limit: (...args: any[]) => mockLimit(...args),
+  onSnapshot: vi.fn(() => vi.fn()),
   serverTimestamp: () => new Date("2026-10-16T12:00:00Z"),
   getFirestore: vi.fn(),
 }));

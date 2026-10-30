@@ -34,6 +34,15 @@ export const AppHeader: React.FC = () => {
               </Link>
             )}
 
+            {/* Indicador de Sincronização em Tempo Real */}
+            <div
+              className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-emerald-950/80 border border-emerald-500/40 text-emerald-400 text-[10px] font-bold"
+              title="Sincronização em tempo real ativa entre todos os dispositivos"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
+              <span className="hidden sm:inline">Ao vivo</span>
+            </div>
+
             {/* Identificação de Perfil */}
             <div className="flex items-center gap-1.5 text-xs bg-gray-900 border border-gray-700 px-2.5 py-1 rounded-xl">
               <span className="max-w-[100px] truncate font-semibold text-gray-200 hidden xs:inline">
